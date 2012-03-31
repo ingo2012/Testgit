@@ -1,0 +1,122 @@
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package com.utils;
+
+import java.awt.Component;
+import java.awt.Font;
+import javax.swing.JLabel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.table.DefaultTableCellRenderer;
+import javax.swing.table.DefaultTableModel;
+import javax.swing.table.TableColumnModel;
+
+/**
+ *
+ * @author monitor
+ */
+public class EpromTable {
+
+     String[] columnNames = {"Adress","00","01","02", "03","04","05" ,"06","07","ASCII"};
+     Object[][] data = {};
+
+      private JTable jTable1;
+      DefaultTableModel tModel = new DefaultTableModel(data, columnNames) {
+          @Override
+          public boolean isCellEditable(int row, int column) {
+            return false;
+          }
+      };
+
+          
+        DefaultTableCellRenderer r = new DefaultTableCellRenderer() {
+        @Override
+           @SuppressWarnings("element-type-mismatch")
+           public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+	       super.getTableCellRendererComponent(table, value, isSelected,hasFocus, row, column);
+
+           setVerticalAlignment(JLabel.CENTER);
+	       setHorizontalAlignment(JLabel.CENTER);
+
+
+	    return this;
+ 	    }
+
+       };
+     
+      //
+
+
+
+      /**
+       * 
+       * @param scrPane
+       */
+      public EpromTable(JScrollPane scrPane) {
+         jTable1 = new javax.swing.JTable();
+         jTable1.setModel(tModel);
+         jTable1.setDefaultRenderer(Object.class, r);
+         jTable1.setFont(new java.awt.Font("Courier New", 0, 14));
+        // jTable1.setFont(new Font("Bookman",Font.BOLD+Font.ITALIC,18));
+         //jTable1.setAutoResizeMode(0);
+         scrPane.setViewportView(jTable1);
+         scrPane.setSize(400,200);
+         
+        // ... und der Sorter muss wissen, welche Daten er sortieren muss
+        // sorter.setModel(tModel );
+        jTable1.sizeColumnsToFit(0);
+        //jTable1.co
+        //jTable1.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+
+        TableColumnModel col = jTable1.getColumnModel();
+      // 1. Col contains Version
+
+      // 2. Col contains rowcount
+      col.getColumn(0).setMinWidth(90);
+      col.getColumn(0).setMaxWidth(90);
+      col.getColumn(0).setWidth(90);
+
+      col.getColumn(2).setMinWidth(30);
+      col.getColumn(2).setMaxWidth(30);
+      col.getColumn(2).setWidth(30);
+
+      for(int i=1;i<10;i++) {
+       col.getColumn(i).setMinWidth(30);
+       col.getColumn(i).setMaxWidth(30);
+       col.getColumn(i).setWidth(30);
+      }
+
+     col.getColumn(9).setMinWidth(250);
+     col.getColumn(9).setMaxWidth(250);
+      col.getColumn(9).setWidth(250);
+    }
+
+
+     public String fill (String toFill, int amount, char filler) {
+         String s= "";
+         for(int i=0;i<amount - toFill.length();i++) {
+             s = s+filler;
+         }
+         toFill = s+toFill;
+         return(toFill);
+     }
+
+    /**
+     *
+     * @param i
+     * @param s
+     * @param Ascii
+     */
+    public void addRow(int i, String[] s,String Ascii) {
+        String t = Integer.toHexString(i);
+        // t = hex(i);
+        // Integer.toHexString(i).toUpperCase();
+        t = "0x"+fill(t,5,'0');
+        tModel.addRow(new Object[]{t,s[0],s[1],s[2],s[3],s[4],s[5],s[6],s[7],Ascii});
+    }
+
+ 
+}

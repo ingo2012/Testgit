@@ -1,0 +1,117 @@
+/*
+ * hex2bin.java
+ * @author monitor
+
+ * Created on 09.03.2010, 20:58:24
+ *
+ *
+ *
+
+--------------------------------------------------------------------------------
+-----------------------       C V S - I n f o    -------------------------------
+--------------------------------------------------------------------------------
+ Info : $Id: hex2bin.java,v 1.1 2010/05/17 21:28:58 cvs Exp $
+ Log  : $Log: hex2bin.java,v $
+ Log  : Revision 1.1  2010/05/17 21:28:58  cvs
+ Log  : Stand 17.05.10
+ Log  :
+ Log  : Revision 1.2  2010/04/03 14:38:29  cvs
+ Log  : Stand 03.04.2010
+ Log  :
+--------------------------------------------------------------------------------
+-----------------------       C V S - I n f o    -------------------------------
+--------------------------------------------------------------------------------
+ *
+ */
+
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package TestPort;
+
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
+
+
+
+public class hex2bin {
+
+    static void hex2bin(int promSize,String hexdata) {
+        byte [] prom = new byte[promSize];
+        String temp;
+        int val;
+        for (int i = 0; i < hexdata.length(); i += 2) {
+            temp = "0x"+hexdata.charAt(i)+hexdata.charAt(i+1);
+            val  = Integer.decode(temp);
+            // System.out.println(hexdata.charAt(i)+" "+hexdata.charAt(i+1)+" val="+val);
+            prom[i / 2] = (byte) val;
+        }
+        BufferedOutputStream out = null;
+        String filename = "/home/monitor/minicom_neu.hex.bin";
+        try {
+            out = new BufferedOutputStream(new FileOutputStream(filename));
+            try {
+                out.write(prom, 0, prom.length);
+                out.flush();
+                out.close();
+            } catch (IOException ex) {
+                System.out.println("Error=" + ex);
+            }
+        } catch (FileNotFoundException ex) {
+            System.out.println("Error=" + ex);
+        }
+    }
+
+  public static void main(String args[]) throws FileNotFoundException, IOException {
+      /*
+     String hex = "0x0008010909";
+     String hexNumber = Integer.toHexString(15);
+     System.out.println(hexNumber);
+     int val = Integer.decode(hex);
+     System.out.println("Val="+val);
+     hex2bin(3,"FF0001");
+*/
+      String s = "/home/monitor/eprom_256kb.prom";
+      String text = "";
+
+       File datei = new File("/home/monitor/minicom_neu.hex");
+       FileReader leser = new FileReader(datei);
+
+	 // erzeugen einer Dauerschleife:
+       int i=0;
+   for(;;){
+       i++;
+    
+     int gelesenInt = leser.read();
+     System.out.println("gelesen "+gelesenInt);
+
+		 // Wenn kein Zeichen mehr zurückgegeben wird (= -1),
+		 // dann ist das Dateienende ereicht,
+		 // daher aufhören
+     if(gelesenInt == -1){break;}
+
+		 // ein char wird als integer eingelesen!
+		 //Daher als char umwandeln
+     char gelesenChar = (char) gelesenInt;
+
+		 //Jedes Zeichen ausgeben
+     System.out.print("Char= "+gelesenChar);
+     text = text+gelesenChar;
+     if(i==65536) { break;}
+   }
+
+   //System.out.println("Text="+text);
+   System.out.println("TextLen="+text.length());
+   hex2bin(text.length()/2,text);
+   
+  }
+
+
+
+}

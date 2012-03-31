@@ -1,0 +1,888 @@
+/*
+ * Eprog.java
+ *
+ * Created on 09.03.2010, 20:58:24
+ *
+ * Links anzeige HEX-Format
+ * http://www.rgagnon.com/javadetails/java-0596.html
+
+---------------------------------------------------------------------------------
+-----------------------       C V S - I n f o    --------------------------------
+---------------------------------------------------------------------------------
+ Info : $Id: Eprog.java,v 1.3 2010/05/13 11:56:02 cvs Exp $
+ Log  : $Log: Eprog.java,v $
+ Log  : Revision 1.3  2010/05/13 11:56:02  cvs
+ Log  : Images hinzu
+ Log  :
+ Log  : Revision 1.2  2010/04/03 14:38:29  cvs
+ Log  : Stand 03.04.2010
+ Log  :
+---------------------------------------------------------------------------------
+-----------------------       C V S - I n f o    --------------------------------
+---------------------------------------------------------------------------------
+ *
+ */
+
+package com.gui;
+
+import com.utils.EpromUtils;
+import com.utils.EpromTable;
+import com.utils.Logging;
+import java.awt.Color;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.TooManyListenersException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/*
+import javax.comm.CommPortIdentifier;
+import javax.comm.NoSuchPortException;
+import javax.comm.PortInUseException;
+import javax.comm.SerialPort;
+import javax.comm.SerialPortEvent;
+import javax.comm.SerialPortEventListener;
+*/
+
+import gnu.io.*;
+
+
+import javax.swing.JDialog;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JOptionPane;
+import javax.swing.SwingWorker;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.PosixParser;
+
+
+
+/**
+ *
+ * @author monitor
+ */
+public class Eprog extends javax.swing.JFrame implements Runnable, SerialPortEventListener {
+
+     EpromTable mTable; /* Master */
+     EpromTable sTable; /* Slave */
+     EpromUtils master               = new EpromUtils();
+     EpromUtils slave                = new EpromUtils();
+
+     final int ScreenWidth           = 1058;
+     final int ScreenHeight          = 768;
+
+     static public Logging  log      = null;
+     private static boolean Debug    = false;
+     private static String  LogLevel = "3";
+
+     HashMap<String, EpromType> EpromMap = EpromMap = new HashMap<String, EpromType>();
+     String actualEprom = "C";
+
+     
+     SerialPort serialPort              = null;
+     private static String EprogPort    = "/dev/ttyUSB1";
+     private OutputStream outputStream;
+     private InputStream inputStream;
+     private String readStatus          = "";
+     private boolean ttyFound           = false;
+
+     Thread readThread;
+     private SwingWorker<String, Void> worker;
+     private boolean isCancel           = false;
+
+     private JDialog aboutBox = null;
+     private int progBarVal       = 0;
+
+     /** Creates new form Eprog
+      * @throws UnsupportedEncodingException 
+      */
+
+    public Eprog() throws UnsupportedEncodingException {
+        setContentPane(new BackGroundPane("src/com/Images/bg.png"));
+        initComponents();
+
+        addWindowListener(new java.awt.event.WindowAdapter() {
+        @Override
+          public void windowClosing(java.awt.event.WindowEvent evt) {
+             exitForm(evt);
+          }
+         });
+
+        java.awt.Dimension screenSize = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        setBounds((screenSize.width-ScreenWidth)/2, (screenSize.height-ScreenHeight)/2, ScreenWidth, ScreenHeight);
+        
+
+
+        log = new Logging(LogScreen);
+        log.setDebug(Debug);
+        
+        MessageOk("Starting....");
+
+        generateEpromList();
+
+        /* Set Tables */
+        mTable = new EpromTable(scrPaneMaster);
+        sTable = new EpromTable(scrPaneSlave);
+        showEpromList(jListEpromType); // call showPromTable automatic !
+        actualEprom = "7";
+        jListEpromType.setSelectedIndex(5);
+
+
+        jbCancelAction.setEnabled(false);
+        MessageOk("Ok");
+        log.info("Init EPROG..");
+       
+        // Init SerialDevice
+        // Important: In the lib Directory we need javax.comm.properties
+        initEprog(EprogPort);
+        // We enable it only if TTY found
+        setPullDownMenue(ttyFound);
+    }
+
+    private void setPullDownMenue(boolean b) {
+        slaveMenue.setEnabled(b);
+        masterMenue.setEnabled(b);
+        if(b) {
+            isCancel = false;
+        }
+    }
+
+    private void initEprog(String tty) {
+       CommPortIdentifier portId = null;
+
+        try {
+            portId = CommPortIdentifier.getPortIdentifier(tty);
+            log.info("Opening port " + portId.getName());
+            try {
+                serialPort = (SerialPort) portId.open("Eprog", 2000);
+            } catch (PortInUseException e) {
+                log.error("Port in use.");
+            }
+
+            try {
+                outputStream = serialPort.getOutputStream();
+            } catch (IOException e) {
+                log.error("IOExeption " + e);
+            }
+
+            try {
+                serialPort.setSerialPortParams(9600, SerialPort.DATABITS_8, SerialPort.STOPBITS_1, SerialPort.PARITY_ODD);
+                serialPort.setFlowControlMode(SerialPort.FLOWCONTROL_RTSCTS_IN);
+                serialPort.setFlowControlMode(SerialPort.FLOWCONTROL_RTSCTS_OUT);
+                
+            } catch (gnu.io.UnsupportedCommOperationException ex) {
+                log.error("UnsupportedCommOperationException :" + ex);
+            }
+
+
+            try {
+                serialPort.notifyOnOutputEmpty(false);  // muss bei javaxcom auf true
+                serialPort.notifyOnCTS(true);
+                serialPort.notifyOnDataAvailable(true);
+                serialPort.notifyOnParityError(true);
+                serialPort.notifyOnDSR(true);
+                //serialPort.notifyAll();
+            } catch (Exception e) {
+                System.out.println("Error setting event notification"+e);
+            }
+
+            try {
+                inputStream = serialPort.getInputStream();
+            } catch (IOException e) {
+                log.error("IOExeption " + e);
+            }
+
+            try {
+                serialPort.addEventListener((SerialPortEventListener) this);
+            } catch (TooManyListenersException e) {
+                log.error("TooManyListenersException " + e);
+            }
+
+            serialPort.notifyOnDataAvailable(true);
+            readThread = new Thread(this);
+            readThread.start();
+            ttyFound = true;
+
+        } catch (NoSuchPortException ex) {
+            log.error("Port " + tty + " not found !");
+        }
+    }
+
+
+    private void writeString(String s) {
+        try {
+	      outputStream.write(s.getBytes());
+              outputStream.flush();
+	    } catch (IOException e) {}
+
+	try {
+	      Thread.sleep(1000);  // Be sure data is xferred
+	    } catch (Exception e) {
+               log.error("Exeption "+e);
+            }
+    }
+
+    public void run() {
+	try {
+	    Thread.sleep(2000);
+	} catch (InterruptedException e) {}
+    }
+
+    public void serialEvent(SerialPortEvent event) {
+        int numBytes = 0;
+
+        if (isCancel == false) {
+
+            switch (event.getEventType()) {
+
+                case SerialPortEvent.BI:
+                    log.info("BI Event");
+                    break;
+
+                case SerialPortEvent.OE:
+                    log.info("OE Event");
+                    break;
+
+                case SerialPortEvent.FE:
+                    log.info("FE Event");
+                    break;
+
+                case SerialPortEvent.PE:
+                    log.info("PE Event");
+                    break;
+
+                case SerialPortEvent.CD:
+                    log.info("CD Event");
+                    break;
+
+                case SerialPortEvent.CTS:
+                    progBarVal = progBarVal +8;
+                    if(progBarVal>100) { progBarVal = 99;}
+                    progBar.setValue(progBarVal);
+                    log.debug("CTS Event");
+                    break;
+
+                case SerialPortEvent.DSR:
+                    log.info("DSR Event");
+                    break;
+
+                case SerialPortEvent.RI:
+                    log.info("RI Event");
+                    break;
+
+                case SerialPortEvent.OUTPUT_BUFFER_EMPTY:
+                    progBarVal = progBarVal +20;
+                    if(progBarVal>100) { progBarVal = 100;}
+                    progBar.setValue(progBarVal);
+                    log.info("OutputBufferEmpty Event");
+                    break;
+
+                case SerialPortEvent.DATA_AVAILABLE:
+                    byte[] readBuffer = new byte[16];
+
+                    try {
+                        while (inputStream.available() > 0) {
+                            numBytes = inputStream.read(readBuffer);
+                        }
+
+                        // ifBlankTest , anders behandeln als auslesen
+                        String result = new String(readBuffer);
+                        Pattern CRLF = Pattern.compile("(\r\n|\r|\n|\n\r)");
+                        Matcher m = CRLF.matcher(result);
+
+                        if (m.find()) {
+                            result = m.replaceAll("X");
+                            log.info("m.find ....");
+                        }
+
+
+                        System.out.println("NumBytes=" + numBytes + " Read: " + result);
+                        log.info("NumBytes=" + numBytes + " Read: " + result);
+                        readStatus = result;
+                        log.info("readStatus=" + readStatus);
+
+                        log.info("NumBytes=" + numBytes + " readBuf=" + readBuffer[0]);
+                    } catch (IOException e) {
+                    }
+
+                    break;
+            }
+        }
+    }
+
+
+    private void showPromTable() {
+        mTable.deleteData();
+        sTable.deleteData();
+        master.initProm(EpromMap.get(actualEprom).Size);
+        slave.initProm(EpromMap.get(actualEprom).Size);
+        mTable.showPromTable(mTable,master);
+        sTable.showPromTable(sTable,slave);
+    }
+
+    /**
+      * generate a EpromMap with all supported EpromTypes
+      * and the corresponding command.
+      *
+      */
+    private void generateEpromList() {
+        EpromType p;
+        p = new EpromType("2716",2048,"C",2000);
+        EpromMap.put("C",p);
+
+        p = new EpromType("2532",4096,"B",4000);
+        EpromMap.put("B",p);
+
+        p = new EpromType("2732",4096,"A",4000);
+        EpromMap.put("A",p);
+
+        p = new EpromType("2732A",4096,"9",4000);
+        EpromMap.put("9",p);
+
+        p = new EpromType("2764",8192,"8",8000);
+        EpromMap.put("8",p);
+
+        p = new EpromType("2764A",8192,"7",8000);
+        EpromMap.put("7",p);
+
+        p = new EpromType("27128",16384,"6",16000);
+        EpromMap.put("6",p);
+
+        p = new EpromType("27128A",16384,"5",16000);
+        EpromMap.put("5",p);
+
+        p = new EpromType("27256 / 21,0 V",32768,"4",32000);
+        EpromMap.put("4",p);
+
+        p = new EpromType("27256 / 12,5 V",32768,"3",32000);
+        EpromMap.put("3",p);
+
+        p = new EpromType("27512",65536,"2",65000);
+        EpromMap.put("2",p);
+    }
+
+   /**
+    * Show the List in reverse order.
+    *
+    * @param jComboBox 
+    */
+    public void showEpromList(javax.swing.JComboBox jComboBox) {
+        EpromType p;
+        jComboBox.removeAllItems();
+
+        List<String> sortedList = new ArrayList<String>();
+        sortedList.addAll(EpromMap.keySet());
+        Comparator<String> comparator = Collections.<String>reverseOrder();
+        Collections.sort(sortedList,comparator);
+
+        for (int i = 0; i < sortedList.size(); i++) {
+            // System.out.println(sortedList.get(i) + ": " + EpromMap.get(sortedList.get(i)));
+            jComboBox.addItem(EpromMap.get(sortedList.get(i)).Type);
+        }
+
+     
+    }
+
+    public void MessageOk(String message) {
+         Message.setForeground(Color.blue);
+         Message.setText(message);
+         Message.repaint();
+    }
+
+    public void MessageErr(String message) {
+         Message.setForeground(Color.red);
+         Message.setText(message);
+         Message.repaint();
+    }
+
+    /** This method is called from within the constructor to
+     * initialize the form.
+     * WARNING: Do NOT modify this code. The content of this method is
+     * always regenerated by the Form Editor.
+     */
+    @SuppressWarnings("unchecked")
+    // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
+    private void initComponents() {
+
+        Message = new javax.swing.JTextField();
+        jScrollPane1 = new javax.swing.JScrollPane();
+        LogScreen = new javax.swing.JTextArea();
+        jPanel1 = new javax.swing.JPanel();
+        scrPaneSlave = new javax.swing.JScrollPane();
+        scrPaneMaster = new javax.swing.JScrollPane();
+        jbCancelAction = new javax.swing.JButton();
+        progBar = new javax.swing.JProgressBar();
+        jListEpromType = new javax.swing.JComboBox();
+        jLabel1 = new javax.swing.JLabel();
+        jMenuBar1 = new javax.swing.JMenuBar();
+        jMenu1 = new javax.swing.JMenu();
+        jQuit = new javax.swing.JMenuItem();
+        masterMenue = new javax.swing.JMenu();
+        masterBlankTest = new javax.swing.JMenuItem();
+        masterRead = new javax.swing.JMenuItem();
+        masterChkSum = new javax.swing.JMenuItem();
+        masterComparewithSlave = new javax.swing.JMenuItem();
+        masterSavetoFile = new javax.swing.JMenuItem();
+        slaveMenue = new javax.swing.JMenu();
+        slaveBlankTest = new javax.swing.JMenuItem();
+        slaveRead = new javax.swing.JMenuItem();
+        slaveChkSum = new javax.swing.JMenuItem();
+        slaveCompareMaster = new javax.swing.JMenuItem();
+        slaveProgram = new javax.swing.JMenuItem();
+        slaveSaveToFile = new javax.swing.JMenuItem();
+        slaveLoadFile = new javax.swing.JMenuItem();
+        About = new javax.swing.JMenu();
+        showAbout = new javax.swing.JMenuItem();
+
+        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setTitle("EPROG");
+        setForeground(java.awt.Color.white);
+
+        Message.setEditable(false);
+        Message.setText("jTextField1");
+        Message.setBorder(javax.swing.BorderFactory.createEtchedBorder());
+
+        LogScreen.setColumns(20);
+        LogScreen.setRows(5);
+        LogScreen.setBorder(new javax.swing.border.SoftBevelBorder(javax.swing.border.BevelBorder.RAISED, null, null, null, new java.awt.Color(51, 51, 255)));
+        jScrollPane1.setViewportView(LogScreen);
+
+        jPanel1.setBackground(new java.awt.Color(220, 230, 237));
+        jPanel1.setBorder(new javax.swing.border.LineBorder(new java.awt.Color(0, 0, 0), 1, true));
+
+        scrPaneSlave.setBackground(new java.awt.Color(220, 230, 237));
+        scrPaneSlave.setBorder(javax.swing.BorderFactory.createTitledBorder("Slave / File"));
+
+        scrPaneMaster.setBackground(new java.awt.Color(220, 230, 237));
+        scrPaneMaster.setBorder(javax.swing.BorderFactory.createTitledBorder("Master"));
+
+        jbCancelAction.setText("Cancel Action");
+        jbCancelAction.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jbCancelActionActionPerformed(evt);
+            }
+        });
+
+        javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
+        jPanel1.setLayout(jPanel1Layout);
+        jPanel1Layout.setHorizontalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, jPanel1Layout.createSequentialGroup()
+                        .addComponent(scrPaneMaster, javax.swing.GroupLayout.PREFERRED_SIZE, 500, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(18, 18, 18)
+                        .addComponent(scrPaneSlave, javax.swing.GroupLayout.DEFAULT_SIZE, 498, Short.MAX_VALUE))
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addGap(240, 240, 240)
+                        .addComponent(jbCancelAction, javax.swing.GroupLayout.PREFERRED_SIZE, 533, javax.swing.GroupLayout.PREFERRED_SIZE)))
+                .addContainerGap())
+        );
+        jPanel1Layout.setVerticalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(scrPaneSlave, javax.swing.GroupLayout.DEFAULT_SIZE, 371, Short.MAX_VALUE)
+                    .addComponent(scrPaneMaster, javax.swing.GroupLayout.PREFERRED_SIZE, 371, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jbCancelAction)
+                .addContainerGap())
+        );
+
+        progBar.setForeground(new java.awt.Color(129, 165, 246));
+
+        jListEpromType.setBackground(new java.awt.Color(153, 204, 255));
+        jListEpromType.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                setEpromType(evt);
+            }
+        });
+
+        jLabel1.setText("EProm:");
+
+        jMenuBar1.setPreferredSize(new java.awt.Dimension(100, 21));
+
+        jMenu1.setText("File");
+
+        jQuit.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Q, java.awt.event.InputEvent.CTRL_MASK));
+        jQuit.setText("Quit");
+        jQuit.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jQuitActionPerformed(evt);
+            }
+        });
+        jMenu1.add(jQuit);
+
+        jMenuBar1.add(jMenu1);
+
+        masterMenue.setText("Master");
+
+        masterBlankTest.setText("Blank Test");
+        masterBlankTest.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                masterBlankTestActionPerformed(evt);
+            }
+        });
+        masterMenue.add(masterBlankTest);
+
+        masterRead.setText("Read");
+        masterMenue.add(masterRead);
+
+        masterChkSum.setText("CheckSum");
+        masterMenue.add(masterChkSum);
+
+        masterComparewithSlave.setText("Compare with Slave");
+        masterMenue.add(masterComparewithSlave);
+
+        masterSavetoFile.setText("Save to File");
+        masterMenue.add(masterSavetoFile);
+
+        jMenuBar1.add(masterMenue);
+
+        slaveMenue.setText("Slave");
+
+        slaveBlankTest.setText("Blank Test");
+        slaveBlankTest.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                slaveBlankTestActionPerformed(evt);
+            }
+        });
+        slaveMenue.add(slaveBlankTest);
+
+        slaveRead.setText("Read");
+        slaveRead.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                slaveReadActionPerformed(evt);
+            }
+        });
+        slaveMenue.add(slaveRead);
+
+        slaveChkSum.setText("CheckSum");
+        slaveMenue.add(slaveChkSum);
+
+        slaveCompareMaster.setText("Compare Master");
+        slaveMenue.add(slaveCompareMaster);
+
+        slaveProgram.setText("Program");
+        slaveMenue.add(slaveProgram);
+
+        slaveSaveToFile.setText("Save to File");
+        slaveMenue.add(slaveSaveToFile);
+
+        slaveLoadFile.setText("Load File");
+        slaveLoadFile.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                slaveLoadFileActionPerformed(evt);
+            }
+        });
+        slaveMenue.add(slaveLoadFile);
+
+        jMenuBar1.add(slaveMenue);
+
+        About.setText("About");
+
+        showAbout.setText("Info");
+        showAbout.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                showAboutActionPerformed(evt);
+            }
+        });
+        About.add(showAbout);
+
+        jMenuBar1.add(About);
+
+        setJMenuBar(jMenuBar1);
+
+        javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
+        getContentPane().setLayout(layout);
+        layout.setHorizontalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addGap(10, 10, 10)
+                        .addComponent(jLabel1, javax.swing.GroupLayout.DEFAULT_SIZE, 48, Short.MAX_VALUE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(jListEpromType, javax.swing.GroupLayout.PREFERRED_SIZE, 160, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(1546, 1546, 1546))
+                    .addGroup(layout.createSequentialGroup()
+                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                            .addComponent(jPanel1, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(Message, javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(progBar, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(jScrollPane1, javax.swing.GroupLayout.Alignment.LEADING))
+                        .addContainerGap(24, Short.MAX_VALUE))))
+        );
+        layout.setVerticalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel1)
+                    .addComponent(jListEpromType, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(10, 10, 10)
+                .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.DEFAULT_SIZE, 89, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(progBar, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(Message, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap())
+        );
+
+        pack();
+    }// </editor-fold>//GEN-END:initComponents
+
+    private void setEpromType(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_setEpromType
+       EpromType p;
+       String Item = jListEpromType.getSelectedItem().toString();
+       for(String Proms : EpromMap.keySet() ) {
+            p = EpromMap.get(Proms);
+            if (p.Type.equals(Item)) {
+              actualEprom = p.Cmd;
+              MessageOk("Eprom is set to "+p.Type);
+              log.info("Index="+jListEpromType.getSelectedIndex()+ " p"+p.Cmd);
+              break;
+            }
+        }
+       showPromTable();
+    }//GEN-LAST:event_setEpromType
+
+     private void loadFile() {
+      JFileChooser chooser = new JFileChooser();
+      String FileName="";
+      String FullFileName="";
+      int returnVal = chooser.showOpenDialog(new JFrame());
+      if(returnVal == JFileChooser.APPROVE_OPTION) {
+          FullFileName = chooser.getSelectedFile().getAbsolutePath();
+          FileName = chooser.getSelectedFile().getName();
+          File f = new File(FullFileName);
+          MessageOk("Read "+chooser.getSelectedFile().getName());
+
+          if(f.length() > EpromMap.get(actualEprom).Size) {
+           JOptionPane.showMessageDialog(this, "Filesize ("+f.length()+" Bytes) greater then EPromSize "+
+                                                EpromMap.get(actualEprom).Size+" Bytes\n"+
+                                                "We only read "+EpromMap.get(actualEprom).Size+" Bytes");
+          }
+          System.out.println(" Space"+f.length());
+          sTable.deleteData();
+          slave.initProm(EpromMap.get(actualEprom).Size);
+          slave.readFile(FullFileName,f.length());
+          scrPaneSlave.setBorder(javax.swing.BorderFactory.createTitledBorder(" Slave / File ("+chooser.getSelectedFile().getName()+")"));
+          scrPaneSlave.repaint();
+          sTable.showPromTable(sTable, slave);
+          sTable.setDataColor(new Color(0, 122, 0));
+      }
+    }
+
+       /*  Write the prefs for the next start
+     */
+    private void exitForm(java.awt.event.WindowEvent evt) {
+        System.out.println("Stop");
+        if(ttyFound) {
+         serialPort.close();
+        }
+        dispose();
+        System.exit(0);
+    }
+
+    /* Action Methods */
+    
+    private void jQuitActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jQuitActionPerformed
+      java.awt.event.WindowEvent noevent = null;
+      exitForm(noevent);
+    }//GEN-LAST:event_jQuitActionPerformed
+
+    private void slaveLoadFileActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_slaveLoadFileActionPerformed
+        loadFile();
+    }//GEN-LAST:event_slaveLoadFileActionPerformed
+
+    private void slaveBlankTestActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_slaveBlankTestActionPerformed
+        setPullDownMenue(false);
+        writeString("IIIII");
+        writeString("T");
+        writeString(actualEprom);
+        writeString("L");
+        try {
+	    Thread.sleep(EpromMap.get(actualEprom).Delay);
+	} catch (InterruptedException e) {}
+
+        writeString("S");
+        setPullDownMenue(true);
+    }//GEN-LAST:event_slaveBlankTestActionPerformed
+
+    private void masterBlankTestActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_masterBlankTestActionPerformed
+        MessageOk("Start BlankTest...");
+        setPullDownMenue(false);
+        jbCancelAction.setEnabled(true);
+
+        worker = new SwingWorker<String, Void>(){
+        @Override
+         protected void done(){
+            isCancel = false;
+            progBar.setValue(100);
+            if(readStatus.equals("0")) {
+             MessageOk("Eprom is empty !");
+            } else {
+                MessageOk("Eprom is not empty");
+            }
+            log.info("Master Blank Test done. Status="+readStatus);
+            setPullDownMenue(true);
+            jbCancelAction.setEnabled(false);
+         }
+
+        @Override
+         protected String doInBackground()  {
+            log.info("Start Master blank test");
+            progBarVal = 0;
+            progBar.setValue(progBarVal);
+            writeString("IIIII");
+            writeString("T");
+            writeString(actualEprom);
+            writeString("Q");
+            try {
+ 	        Thread.sleep(EpromMap.get(actualEprom).Delay);
+  	    } catch (InterruptedException e) {
+                log.error("doInBackGround IntExeption :"+e);
+              }
+             writeString("S");
+            
+            return("Ok");
+          }
+        };
+
+        // Execute the SwingWorker; the GUI will not freeze
+        worker.execute();
+    }//GEN-LAST:event_masterBlankTestActionPerformed
+
+    private void slaveReadActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_slaveReadActionPerformed
+        writeString("IIIII");
+        writeString("T");
+        writeString(actualEprom);
+        writeString("X");
+        writeString("0");
+        writeString("0000");
+        writeString("Y");
+        writeString("0");
+        writeString("003F");
+        writeString("R");
+        try {
+	    Thread.sleep(1000);
+	} catch (InterruptedException e) {}
+
+    }//GEN-LAST:event_slaveReadActionPerformed
+
+    private void jbCancelActionActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jbCancelActionActionPerformed
+        worker.cancel(true);
+        isCancel  = true;      
+    }//GEN-LAST:event_jbCancelActionActionPerformed
+
+    private void showAboutActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_showAboutActionPerformed
+        if (aboutBox == null) {
+         aboutBox = new About(new JFrame(),true);
+         aboutBox.setLocationRelativeTo(this.rootPane);
+        }
+        aboutBox.setVisible(true);
+    }//GEN-LAST:event_showAboutActionPerformed
+
+
+    /* Main */
+    /**
+    * @param args the command line arguments
+    */
+    public static void main(String args[]) {
+        CommandLine cmd=null;
+        Options options = new Options();
+        options.addOption( "h", false, "Show help" );
+        options.addOption( "d", false, "Debug on" );
+        options.addOption( "l", true, "Loglevel 0-5" );
+        options.addOption( "p", true, "Port eg. /dev/ttyS0 or COM1" );
+
+        CommandLineParser parser = new PosixParser();
+        try {
+            cmd = parser.parse(options, args);
+        } catch (ParseException ex) {
+             System.out.println("Exeption="+ex);
+        }
+
+        if(cmd.hasOption("h")) {
+           HelpFormatter formatter = new HelpFormatter();
+           formatter.printHelp( "Eprog", options );
+           System.exit(0);
+        }
+
+        if(cmd.hasOption("d")) {
+           Debug = true;
+        }
+
+        if(cmd.hasOption("l")) {
+           LogLevel = cmd.getOptionValue("l");
+        }
+
+        if(cmd.hasOption("p")) {
+           EprogPort = cmd.getOptionValue("p");
+        }
+
+       
+        java.awt.EventQueue.invokeLater(new Runnable() {
+            public void run() {
+                try {
+                    new Eprog().setVisible(true);
+                } catch (UnsupportedEncodingException ex) {
+                    log.info("Exeption"+ex);
+                }
+            }
+        });
+    }
+
+    // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JMenu About;
+    private javax.swing.JTextArea LogScreen;
+    private javax.swing.JTextField Message;
+    private javax.swing.JLabel jLabel1;
+    private javax.swing.JComboBox jListEpromType;
+    private javax.swing.JMenu jMenu1;
+    private javax.swing.JMenuBar jMenuBar1;
+    private javax.swing.JPanel jPanel1;
+    private javax.swing.JMenuItem jQuit;
+    private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JButton jbCancelAction;
+    private javax.swing.JMenuItem masterBlankTest;
+    private javax.swing.JMenuItem masterChkSum;
+    private javax.swing.JMenuItem masterComparewithSlave;
+    private javax.swing.JMenu masterMenue;
+    private javax.swing.JMenuItem masterRead;
+    private javax.swing.JMenuItem masterSavetoFile;
+    private javax.swing.JProgressBar progBar;
+    private javax.swing.JScrollPane scrPaneMaster;
+    private javax.swing.JScrollPane scrPaneSlave;
+    private javax.swing.JMenuItem showAbout;
+    private javax.swing.JMenuItem slaveBlankTest;
+    private javax.swing.JMenuItem slaveChkSum;
+    private javax.swing.JMenuItem slaveCompareMaster;
+    private javax.swing.JMenuItem slaveLoadFile;
+    private javax.swing.JMenu slaveMenue;
+    private javax.swing.JMenuItem slaveProgram;
+    private javax.swing.JMenuItem slaveRead;
+    private javax.swing.JMenuItem slaveSaveToFile;
+    // End of variables declaration//GEN-END:variables
+
+
+
+    
+}

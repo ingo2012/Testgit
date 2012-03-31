@@ -1,0 +1,4 @@
+.git
+build
+.eprom_slave.hex.swp
+dist

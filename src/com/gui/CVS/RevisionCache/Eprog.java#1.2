@@ -1,0 +1,549 @@
+/*
+ * Eprog.java
+ *
+ * Created on 09.03.2010, 20:58:24
+ *
+ * Links anzeige HEX-Format
+ * http://www.rgagnon.com/javadetails/java-0596.html
+
+---------------------------------------------------------------------------------
+-----------------------       C V S - I n f o    --------------------------------
+---------------------------------------------------------------------------------
+ Info : $Id: Eprog.java,v 1.2 2010/04/03 14:38:29 cvs Exp $
+ Log  : $Log: Eprog.java,v $
+ Log  : Revision 1.2  2010/04/03 14:38:29  cvs
+ Log  : Stand 03.04.2010
+ Log  :
+ Log  : Revision 1.2  2010/03/26 21:54:19  cvs
+ Log  : 26.03.2010
+ Log  :
+ Log  :
+---------------------------------------------------------------------------------
+-----------------------       C V S - I n f o    --------------------------------
+---------------------------------------------------------------------------------
+ *
+ */
+
+package com.gui;
+
+import com.utils.EpromUtils;
+import com.utils.EpromTable;
+import com.utils.Logging;
+import java.awt.Color;
+import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import javax.comm.CommPortIdentifier;
+import javax.comm.NoSuchPortException;
+import javax.swing.JFileChooser;
+import javax.swing.JFrame;
+import javax.swing.JOptionPane;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
+import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.PosixParser;
+
+/**
+ *
+ * @author monitor
+ */
+public class Eprog extends javax.swing.JFrame {
+
+     EpromTable mTable; /* Master */
+     EpromTable sTable; /* Slave */
+     EpromUtils master  = new EpromUtils();
+     EpromUtils slave   = new EpromUtils();
+
+
+     final int ScreenWidth  = 1058;
+     final int ScreenHeight = 768;
+
+     public Logging log = null;
+     private static boolean Debug = false;
+     private static String LogLevel  = "3";
+
+     HashMap<String, EpromType> EpromMap = EpromMap = new HashMap<String, EpromType>();
+     String actualEprom = "C";
+
+     private static String EprogPort        = "/dev/ttyUSB0";
+
+
+     /** Creates new form Eprog
+      * @throws UnsupportedEncodingException 
+      */
+
+    public Eprog() throws UnsupportedEncodingException {
+        initComponents();
+        // getProperties();
+        //Config config = new Config("config.properties");
+        // String KVSBin = (String) config.ConfigSettings.get("KVS_CLIENT");
+        java.awt.Dimension screenSize = java.awt.Toolkit.getDefaultToolkit().getScreenSize();
+        setBounds((screenSize.width-ScreenWidth)/2, (screenSize.height-ScreenHeight)/2, ScreenWidth, ScreenHeight);
+        log = new Logging(LogScreen);
+        MessageOk("Starting....");
+
+        generateEpromList();
+       
+
+        /* Set Tables */
+        mTable = new EpromTable(scrPaneMaster);
+        sTable = new EpromTable(scrPaneSlave);
+        showEpromList(jListEpromType); // call showPromTable automatic !
+
+
+        jbCancelAction.setEnabled(false);
+        MessageOk("Ok");
+        log.info("Init EPROG..");
+        // Init SerialDevice
+        // mImportant: In the lib Directory we need javax.comm.properties
+        initEprom("/dev/ttyUSB0");
+    }
+
+    private void initEprom(String tty) {
+       CommPortIdentifier	portId = null;
+        try {
+            portId = CommPortIdentifier.getPortIdentifier(tty);
+        } catch (NoSuchPortException ex) {
+            log.info("Exeption:"+ex);
+        }
+       System.out.println("Opening port " + portId.getName());
+    }
+
+    private void showPromTable() {
+        mTable.deleteData();
+        sTable.deleteData();
+        master.initProm(EpromMap.get(actualEprom).Size);
+        slave.initProm(EpromMap.get(actualEprom).Size);
+        mTable.showPromTable(mTable,master);
+        sTable.showPromTable(sTable,slave);
+    }
+
+    /**
+      * generate a EpromMap with all supported EpromType
+      * and the corresponding command.
+      *
+      */
+    private void generateEpromList() {
+        EpromType p;
+        p = new EpromType("2716",2048,"C");
+        EpromMap.put("C",p);
+
+        p = new EpromType("2532",4096,"B");
+        EpromMap.put("B",p);
+
+        p = new EpromType("2732",4096,"A");
+        EpromMap.put("A",p);
+
+        p = new EpromType("2732A",4096,"9");
+        EpromMap.put("9",p);
+
+        p = new EpromType("2764",8192,"8");
+        EpromMap.put("8",p);
+
+        p = new EpromType("2764A",8192,"7");
+        EpromMap.put("7",p);
+
+        p = new EpromType("27128",16384,"6");
+        EpromMap.put("6",p);
+
+        p = new EpromType("27128A",16384,"5");
+        EpromMap.put("5",p);
+
+        p = new EpromType("27256 / 21,0 V",32768,"4");
+        EpromMap.put("4",p);
+
+        p = new EpromType("27256 / 12,5 V",32768,"3");
+        EpromMap.put("3",p);
+
+        p = new EpromType("27512",65536,"2");
+        EpromMap.put("2",p);
+    }
+
+   /**
+    * Show the List in reverse order.
+    *
+    * @param jComboBox 
+    */
+    public void showEpromList(javax.swing.JComboBox jComboBox) {
+        EpromType p;
+        jComboBox.removeAllItems();
+
+        List<String> sortedList = new ArrayList<String>();
+        sortedList.addAll(EpromMap.keySet());
+        Comparator<String> comparator = Collections.<String>reverseOrder();
+        Collections.sort(sortedList,comparator);
+
+        for (int i = 0; i < sortedList.size(); i++) {
+            // System.out.println(sortedList.get(i) + ": " + EpromMap.get(sortedList.get(i)));
+            jComboBox.addItem(EpromMap.get(sortedList.get(i)).Type);
+        }
+
+        /*
+        for(String Proms : EpromMap.keySet() ) {
+            p = EpromMap.get(Proms);
+            jComboBox.addItem(p.Type);
+        }
+         *
+         */
+    }
+
+    public void MessageOk(String message) {
+         Message.setForeground(Color.blue);
+         Message.setText(message);
+         Message.repaint();
+    }
+
+    public void MessageErr(String message) {
+         Message.setForeground(Color.red);
+         Message.setText(message);
+         Message.repaint();
+    }
+
+    /** This method is called from within the constructor to
+     * initialize the form.
+     * WARNING: Do NOT modify this code. The content of this method is
+     * always regenerated by the Form Editor.
+     */
+    @SuppressWarnings("unchecked")
+    // <editor-fold defaultstate="collapsed" desc="Generated Code">//GEN-BEGIN:initComponents
+    private void initComponents() {
+
+        Message = new javax.swing.JTextField();
+        jScrollPane1 = new javax.swing.JScrollPane();
+        LogScreen = new javax.swing.JTextArea();
+        jPanel1 = new javax.swing.JPanel();
+        scrPaneSlave = new javax.swing.JScrollPane();
+        scrPaneMaster = new javax.swing.JScrollPane();
+        jbCancelAction = new javax.swing.JButton();
+        jProgressBar2 = new javax.swing.JProgressBar();
+        jListEpromType = new javax.swing.JComboBox();
+        jLabel1 = new javax.swing.JLabel();
+        jMenuBar1 = new javax.swing.JMenuBar();
+        jMenu1 = new javax.swing.JMenu();
+        jQuit = new javax.swing.JMenuItem();
+        jMenu2 = new javax.swing.JMenu();
+        jMenuItem7 = new javax.swing.JMenuItem();
+        jMenuItem8 = new javax.swing.JMenuItem();
+        jMenuItem9 = new javax.swing.JMenuItem();
+        jMenuItem10 = new javax.swing.JMenuItem();
+        jMenuItem11 = new javax.swing.JMenuItem();
+        jMenu3 = new javax.swing.JMenu();
+        jMenuItem1 = new javax.swing.JMenuItem();
+        jMenuItem2 = new javax.swing.JMenuItem();
+        jMenuItem3 = new javax.swing.JMenuItem();
+        jMenuItem4 = new javax.swing.JMenuItem();
+        jMenuItem5 = new javax.swing.JMenuItem();
+        jMenuItem6 = new javax.swing.JMenuItem();
+        jSlaveLoadFile = new javax.swing.JMenuItem();
+        jMenu4 = new javax.swing.JMenu();
+
+        setDefaultCloseOperation(javax.swing.WindowConstants.EXIT_ON_CLOSE);
+        setTitle("EPROG");
+
+        Message.setEditable(false);
+        Message.setText("jTextField1");
+        Message.setBorder(javax.swing.BorderFactory.createEtchedBorder());
+
+        LogScreen.setColumns(20);
+        LogScreen.setRows(5);
+        jScrollPane1.setViewportView(LogScreen);
+
+        scrPaneSlave.setBorder(javax.swing.BorderFactory.createTitledBorder("Slave / File"));
+
+        scrPaneMaster.setBorder(javax.swing.BorderFactory.createTitledBorder("Master"));
+
+        jbCancelAction.setText("Cancel Action");
+
+        javax.swing.GroupLayout jPanel1Layout = new javax.swing.GroupLayout(jPanel1);
+        jPanel1.setLayout(jPanel1Layout);
+        jPanel1Layout.setHorizontalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(jPanel1Layout.createSequentialGroup()
+                        .addComponent(scrPaneMaster, javax.swing.GroupLayout.PREFERRED_SIZE, 500, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(18, 18, 18)
+                        .addComponent(scrPaneSlave, javax.swing.GroupLayout.DEFAULT_SIZE, 498, Short.MAX_VALUE))
+                    .addComponent(jbCancelAction, javax.swing.GroupLayout.DEFAULT_SIZE, 1016, Short.MAX_VALUE))
+                .addContainerGap())
+        );
+        jPanel1Layout.setVerticalGroup(
+            jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(jPanel1Layout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(jPanel1Layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addComponent(scrPaneSlave, javax.swing.GroupLayout.DEFAULT_SIZE, 371, Short.MAX_VALUE)
+                    .addComponent(scrPaneMaster, javax.swing.GroupLayout.PREFERRED_SIZE, 371, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jbCancelAction)
+                .addContainerGap())
+        );
+
+        jListEpromType.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                setEpromType(evt);
+            }
+        });
+
+        jLabel1.setText("EProm:");
+
+        jMenuBar1.setPreferredSize(new java.awt.Dimension(100, 21));
+
+        jMenu1.setText("File");
+
+        jQuit.setAccelerator(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_Q, java.awt.event.InputEvent.CTRL_MASK));
+        jQuit.setText("Quit");
+        jQuit.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jQuitActionPerformed(evt);
+            }
+        });
+        jMenu1.add(jQuit);
+
+        jMenuBar1.add(jMenu1);
+
+        jMenu2.setText("Master");
+
+        jMenuItem7.setText("Blank Test");
+        jMenu2.add(jMenuItem7);
+
+        jMenuItem8.setText("Read");
+        jMenu2.add(jMenuItem8);
+
+        jMenuItem9.setText("CheckSum");
+        jMenu2.add(jMenuItem9);
+
+        jMenuItem10.setText("Compare with Slave");
+        jMenu2.add(jMenuItem10);
+
+        jMenuItem11.setText("Save to File");
+        jMenu2.add(jMenuItem11);
+
+        jMenuBar1.add(jMenu2);
+
+        jMenu3.setText("Slave");
+
+        jMenuItem1.setText("Blank Test");
+        jMenu3.add(jMenuItem1);
+
+        jMenuItem2.setText("Read");
+        jMenu3.add(jMenuItem2);
+
+        jMenuItem3.setText("CheckSum");
+        jMenu3.add(jMenuItem3);
+
+        jMenuItem4.setText("Compare Master");
+        jMenu3.add(jMenuItem4);
+
+        jMenuItem5.setText("Program");
+        jMenu3.add(jMenuItem5);
+
+        jMenuItem6.setText("Save to File");
+        jMenu3.add(jMenuItem6);
+
+        jSlaveLoadFile.setText("Load File");
+        jSlaveLoadFile.addActionListener(new java.awt.event.ActionListener() {
+            public void actionPerformed(java.awt.event.ActionEvent evt) {
+                jSlaveLoadFileActionPerformed(evt);
+            }
+        });
+        jMenu3.add(jSlaveLoadFile);
+
+        jMenuBar1.add(jMenu3);
+
+        jMenu4.setText("About");
+        jMenuBar1.add(jMenu4);
+
+        setJMenuBar(jMenuBar1);
+
+        javax.swing.GroupLayout layout = new javax.swing.GroupLayout(getContentPane());
+        getContentPane().setLayout(layout);
+        layout.setHorizontalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                .addContainerGap(javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+                    .addGroup(javax.swing.GroupLayout.Alignment.TRAILING, layout.createSequentialGroup()
+                        .addGap(10, 10, 10)
+                        .addComponent(jLabel1, javax.swing.GroupLayout.DEFAULT_SIZE, 48, Short.MAX_VALUE)
+                        .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                        .addComponent(jListEpromType, javax.swing.GroupLayout.PREFERRED_SIZE, 160, javax.swing.GroupLayout.PREFERRED_SIZE)
+                        .addGap(1546, 1546, 1546))
+                    .addGroup(layout.createSequentialGroup()
+                        .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.TRAILING, false)
+                            .addComponent(jPanel1, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(Message, javax.swing.GroupLayout.Alignment.LEADING)
+                            .addComponent(jProgressBar2, javax.swing.GroupLayout.Alignment.LEADING, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, Short.MAX_VALUE)
+                            .addComponent(jScrollPane1, javax.swing.GroupLayout.Alignment.LEADING))
+                        .addContainerGap(748, Short.MAX_VALUE))))
+        );
+        layout.setVerticalGroup(
+            layout.createParallelGroup(javax.swing.GroupLayout.Alignment.LEADING)
+            .addGroup(layout.createSequentialGroup()
+                .addContainerGap()
+                .addGroup(layout.createParallelGroup(javax.swing.GroupLayout.Alignment.BASELINE)
+                    .addComponent(jLabel1)
+                    .addComponent(jListEpromType, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE))
+                .addGap(10, 10, 10)
+                .addComponent(jPanel1, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(jScrollPane1, javax.swing.GroupLayout.DEFAULT_SIZE, 91, Short.MAX_VALUE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.UNRELATED)
+                .addComponent(jProgressBar2, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addPreferredGap(javax.swing.LayoutStyle.ComponentPlacement.RELATED)
+                .addComponent(Message, javax.swing.GroupLayout.PREFERRED_SIZE, javax.swing.GroupLayout.DEFAULT_SIZE, javax.swing.GroupLayout.PREFERRED_SIZE)
+                .addContainerGap())
+        );
+
+        pack();
+    }// </editor-fold>//GEN-END:initComponents
+
+    private void setEpromType(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_setEpromType
+       EpromType p;
+       String Item = jListEpromType.getSelectedItem().toString();
+       for(String Proms : EpromMap.keySet() ) {
+            p = EpromMap.get(Proms);
+            if (p.Type.equals(Item)) {
+              actualEprom = p.Cmd;
+              MessageOk("Eprom is set to "+p.Type);
+              break;
+            }
+        }
+       showPromTable();
+    }//GEN-LAST:event_setEpromType
+
+    private void jQuitActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jQuitActionPerformed
+        /* Save... */
+        dispose();
+        System.exit(0);
+    }//GEN-LAST:event_jQuitActionPerformed
+
+    private void jSlaveLoadFileActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jSlaveLoadFileActionPerformed
+        loadFile();
+    }//GEN-LAST:event_jSlaveLoadFileActionPerformed
+
+    private void loadFile() {
+      JFileChooser chooser = new JFileChooser();
+      String FileName="";
+      String FullFileName="";
+      int returnVal = chooser.showOpenDialog(new JFrame());
+      if(returnVal == JFileChooser.APPROVE_OPTION) {
+          FullFileName = chooser.getSelectedFile().getAbsolutePath();
+          FileName = chooser.getSelectedFile().getName();
+          File f = new File(FullFileName);
+          MessageOk("Read "+chooser.getSelectedFile().getName());
+
+          if(f.length() > EpromMap.get(actualEprom).Size) {
+           JOptionPane.showMessageDialog(this, "Filesize ("+f.length()+" Bytes) greater then EPromSize "+
+                                                EpromMap.get(actualEprom).Size+" Bytes\n"+
+                                                "We only read "+EpromMap.get(actualEprom).Size+" Bytes");
+          }
+          System.out.println(" Space"+f.length());
+          sTable.deleteData();
+          slave.initProm(EpromMap.get(actualEprom).Size);
+          slave.readFile(FullFileName,f.length());
+          scrPaneSlave.setBorder(javax.swing.BorderFactory.createTitledBorder(" Slave / File ("+chooser.getSelectedFile().getName()+")"));
+          scrPaneSlave.repaint();
+          sTable.showPromTable(sTable, slave);
+      }
+    }
+
+    /**
+    * @param args the command line arguments
+    */
+    public static void main(String args[]) {
+        CommandLine cmd=null;
+        Options options = new Options();
+        options.addOption( "h", false, "Show help" );
+        options.addOption( "d", false, "Debug on" );
+        options.addOption( "l", true, "Loglevel 0-5" );
+        options.addOption( "c", true, "Configuration" );
+        options.addOption( "p", true, "Port eg. /dev/ttyS0" );
+
+
+        CommandLineParser parser = new PosixParser();
+        try {
+            cmd = parser.parse(options, args);
+        } catch (ParseException ex) {
+             System.out.println("Exeption="+ex);
+        }
+
+       if(cmd.hasOption("h")) {
+         HelpFormatter formatter = new HelpFormatter();
+         formatter.printHelp( "Eprog", options );
+         System.exit(0);
+       }
+
+       if(cmd.hasOption("d")) {
+           Debug = true;
+       }
+
+       if(cmd.hasOption("l")) {
+        LogLevel = cmd.getOptionValue("l");
+       }
+
+       if(cmd.hasOption("p")) {
+        EprogPort = cmd.getOptionValue("p");
+       }
+
+       if(cmd.hasOption("c")) {
+       // ConfigFile = cmd.getOptionValue("c");
+       // System.out.println("ConfigFile="+ConfigFile);
+       }
+       else {
+        // print the date
+       }
+
+     
+
+        java.awt.EventQueue.invokeLater(new Runnable() {
+            public void run() {
+                try {
+                    new Eprog().setVisible(true);
+                } catch (UnsupportedEncodingException ex) {
+                    // log.info("Exeption"+ex);
+                }
+            }
+        });
+    }
+
+    // Variables declaration - do not modify//GEN-BEGIN:variables
+    private javax.swing.JTextArea LogScreen;
+    private javax.swing.JTextField Message;
+    private javax.swing.JLabel jLabel1;
+    private javax.swing.JComboBox jListEpromType;
+    private javax.swing.JMenu jMenu1;
+    private javax.swing.JMenu jMenu2;
+    private javax.swing.JMenu jMenu3;
+    private javax.swing.JMenu jMenu4;
+    private javax.swing.JMenuBar jMenuBar1;
+    private javax.swing.JMenuItem jMenuItem1;
+    private javax.swing.JMenuItem jMenuItem10;
+    private javax.swing.JMenuItem jMenuItem11;
+    private javax.swing.JMenuItem jMenuItem2;
+    private javax.swing.JMenuItem jMenuItem3;
+    private javax.swing.JMenuItem jMenuItem4;
+    private javax.swing.JMenuItem jMenuItem5;
+    private javax.swing.JMenuItem jMenuItem6;
+    private javax.swing.JMenuItem jMenuItem7;
+    private javax.swing.JMenuItem jMenuItem8;
+    private javax.swing.JMenuItem jMenuItem9;
+    private javax.swing.JPanel jPanel1;
+    private javax.swing.JProgressBar jProgressBar2;
+    private javax.swing.JMenuItem jQuit;
+    private javax.swing.JScrollPane jScrollPane1;
+    private javax.swing.JMenuItem jSlaveLoadFile;
+    private javax.swing.JButton jbCancelAction;
+    private javax.swing.JScrollPane scrPaneMaster;
+    private javax.swing.JScrollPane scrPaneSlave;
+    // End of variables declaration//GEN-END:variables
+
+
+
+}

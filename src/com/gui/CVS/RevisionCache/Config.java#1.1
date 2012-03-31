@@ -1,0 +1,44 @@
+/*
+ * To change this template, choose Tools | Templates
+ * and open the template in the editor.
+ */
+
+package com.gui;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Properties;
+
+/**
+ *
+ * @author monitor
+ */
+public class Config {
+
+    public Map<?, ?> ConfigSettings;
+    public String propfile = "";
+
+
+    public  Config(String ConfFile) {
+        propfile = ConfFile;
+        String user_dir = System.getProperty("user.dir");
+
+        File conf = new File(user_dir,propfile);
+        Properties properties = new Properties();
+        /* If config not exist , we try it in ../ */
+        if(! conf.exists()) {
+         System.out.println("Config "+conf.getAbsoluteFile()+" not exist.");
+         conf = new File(user_dir,"../"+propfile);
+        }
+        try {
+            System.out.println("Try Config "+conf.getAbsoluteFile());
+            properties.load(new FileInputStream(conf));
+         } catch (IOException e) {
+            e.printStackTrace();
+         }
+        ConfigSettings = Collections.unmodifiableMap(properties);
+    }
+}
